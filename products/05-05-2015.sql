@@ -46,26 +46,3 @@ HAVING AVG(stoc_cantidad) > 100;
  WHERE YEAR(fact_fecha) = 2012
  GROUP BY prod_codigo, prod_detalle
 -- Falta el having
-
--- 10) Mostrar los 10 productos más vendidos en la historia y también los 10 productos
--- menos vendidos en la historia. Además mostrar de esos productos, quien fue el
--- cliente que mayor compra realizó. 
--- NO SIRVE UNION PORQUE TENGO 1 SOLO ORDER BY PARA TODO EL QUERY.
-SELECT TOP 10
-	prod_codigo,
-	prod_detalle,
-	SUM(item_cantidad) as 'Total ventas',
-	(SELECT TOP 1 clie_codigo FROM Cliente
-	 INNER JOIN Factura 
-	 ON clie_codigo = fact_cliente
-	 INNER JOIN Item_Factura
-	 ON fact_numero = item_numero AND
-	 fact_sucursal = item_sucursal AND
-	 fact_tipo = item_tipo
-	 GROUP BY clie_codigo
-	 ORDER BY SUM(item_cantidad) DESC) AS 'Cliente que más compró'
-FROM Producto
-INNER JOIN Item_Factura
-ON item_producto = prod_codigo
-GROUP BY prod_codigo, prod_detalle
-ORDER BY 3 DESC;

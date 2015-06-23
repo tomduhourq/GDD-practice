@@ -492,6 +492,202 @@ CREATE PROCEDURE dbo.Fill_Diferencias AS
 	
 -- EXEC dbo.Fill_Diferencias
 	
+/* 9)  Hacer un trigger que ante alguna modificación de un ítem que se encuentra en Item_Factura de un artículo
+compuesto realice el movimiento de sus correspondientes componentes. */
+
+-- El movimiento se va a hacer en el depósito del vendedor de la factura cuando se modifique
+-- un compuesto y a su vez, la cantidad varíe. Si solo pasa eso, se efectivizará el movimiento.
+IF OBJECT_ID('dbo.updateStockCompuesto') IS NOT NULL
+BEGIN
+	DROP PROCEDURE dbo.updateStockCompuesto;
+END;
+GO
+
+CREATE PROCEDURE dbo.updateStockCompuesto @producto char(8), @deposito char(2), @diferencia decimal(12, 2) AS
+	DECLARE @cantidad decimal(12,2)
+	DECLARE @componente char(8)
+	DECLARE componentes CURSOR FOR 
+	(SELECT comp_cantidad, comp_componente 
+	 FROM Composicion 
+	 WHERE comp_producto = @producto)
+	 
+	 OPEN componentes
+	 
+	 FETCH NEXT FROM componentes INTO @cantidad, @componente
+	 
+	 WHILE @@FETCH_STATUS = 0
+	 BEGIN
+		-- Si la diferencia es mayor a 0, tenía más antes => Devuelvo la diferencia
+		IF @diferencia > 0
+		BEGIN
+			UPDATE STOCK
+			SET stoc_cantidad = stoc_cantidad + (@cantidad * @diferencia)
+			WHERE stoc_producto = @componente AND stoc_deposito = @deposito
+		END
+		-- Sino resto la diferencia
+		ELSE
+		BEGIN
+			UPDATE STOCK
+			SET stoc_cantidad = stoc_cantidad - (@cantidad * @diferencia)
+			WHERE stoc_producto = @componente AND stoc_deposito = @deposito
+		END 
+	 END
+	 
+	 
+
+IF OBJECT_ID('dbo.updateStockCompuestos') IS NOT NULL
+BEGIN
+	DROP TRIGGER dbo.updateStockCompuestos;
+END;
+GO
+
+CREATE TRIGGER dbo.updateStockCompuestos ON Item_Factura AFTER UPDATE 
+AS BEGIN TRANSACTION
+	-- Tengo que ir comparando uno por uno si en deleted cambió la cantidad respecto de inserted.
+	-- Lo hago con dos cursores
+	DECLARE @diferencia decimal(12,2)
+	DECLARE @prodDel char(8)
+	DECLARE @cantDel decimal(12,2)
+	DECLARE @depoDel char(2)
+	DECLARE @prodIns char(8)
+	DECLARE @cantIns decimal(12,2)
+	DECLARE @depoIns char(2)
+	DECLARE deleted_curs CURSOR FOR
+	(SELECT i.item_producto as compuesto,
+		   SUM(i.item_cantidad) as cantidad,
+		   d.depo_codigo as deposito
+	FROM deleted i
+	INNER JOIN Factura f
+	ON f.fact_tipo = i.item_tipo AND
+	   f.fact_sucursal = i.item_sucursal AND
+	   f.fact_numero = i.item_numero
+	INNER JOIN Empleado e
+	ON e.empl_codigo = f.fact_vendedor
+	INNER JOIN DEPOSITO d
+	ON d.depo_codigo = e.empl_codigo
+	INNER JOIN Producto p
+	ON p.prod_codigo = i.item_producto
+	INNER JOIN Composicion c
+	ON p.prod_codigo = c.comp_producto
+	GROUP BY d.depo_codigo, i.item_producto)
+	
+	DECLARE inserted_curs CURSOR FOR
+	(SELECT i.item_producto as compuesto,
+		   SUM(i.item_cantidad) as cantidad,
+		   d.depo_codigo as deposito
+	FROM inserted i
+	INNER JOIN Factura f
+	ON f.fact_tipo = i.item_tipo AND
+	   f.fact_sucursal = i.item_sucursal AND
+	   f.fact_numero = i.item_numero
+	INNER JOIN Empleado e
+	ON e.empl_codigo = f.fact_vendedor
+	INNER JOIN DEPOSITO d
+	ON d.depo_codigo = e.empl_codigo
+	INNER JOIN Producto p
+	ON p.prod_codigo = i.item_producto
+	INNER JOIN Composicion c
+	ON p.prod_codigo = c.comp_producto
+	GROUP BY d.depo_codigo, i.item_producto)
+	
+	OPEN deleted_curs
+	OPEN inserted_curs
+	
+	FETCH NEXT FROM deleted_curs INTO @prodDel, @cantDel, @depoDel
+	FETCH NEXT FROM inserted_curs INTO @prodIns, @cantIns, @depoIns
+	
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+		-- Si la cantidad insertada es distinta de 0, obtener componentes y actualizar stock para el depósito
+		SET @diferencia = @cantDel - @cantIns
+		
+		IF @diferencia != 0 BEGIN
+			EXEC dbo.updateStockCompuesto @prodDel , @depoDel, @diferencia
+		END
+		
+		-- No pasa nada si no tengo diferencias, solo se pide diferencias
+		FETCH NEXT FROM deleted_curs INTO @prodDel, @cantDel, @depoDel
+		FETCH NEXT FROM inserted_curs INTO @prodIns, @cantIns, @depoIns
+	END
+	
+	CLOSE deleted_curs
+	CLOSE inserted_curs
+	DEALLOCATE deleted_curs
+	DEALLOCATE inserted_curs
+COMMIT
+  
+/* 10) Hacer un trigger que ante el intento de borrar un artículo verifique que no exista
+stock. Si es así, borrar ese producto, en caso contrario que emita un mensaje de error. */
+
+IF OBJECT_ID('dbo.verificarStock') IS NOT NULL
+BEGIN
+	DROP TRIGGER dbo.verificarStock;
+END;
+GO
+
+CREATE TRIGGER dbo.verificarStock ON Producto INSTEAD OF DELETE 
+AS BEGIN TRANSACTION
+	-- No puedo hacer el caso individual, tengo que recorrer deleted entera
+	DECLARE @codigo char(8)
+	DECLARE del_curs CURSOR FOR (SELECT prod_codigo FROM DELETED)
+	
+	OPEN del_curs
+	
+	FETCH NEXT FROM del_curs INTO @codigo
+	
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+		IF EXISTS (SELECT 1 FROM STOCK WHERE stoc_producto = '00001707' AND stoc_cantidad > 0)
+		BEGIN
+			PRINT 'El producto con código' + @codigo + ' no puede eliminarse por haber stock exitente del mismo'
+			ROLLBACK
+		END
+		ELSE BEGIN
+			DELETE FROM Producto WHERE prod_codigo = @codigo
+		END
+	END
+COMMIT
+
+ /* 11) Cree el/los objetos de base de datos necesarios para que dado un código de
+empleado se retorne la cantidad de empleados que este tiene a su cargo (directa o
+indirectamente). Solo contar aquellos empleados (directos o indirectos) que sean
+menores que su jefe directo. */
+
+-- Esta es la función GET_EMPLEADOS con una condición por edad, bastaría comparar por fechas de nacimiento
+IF OBJECT_ID('dbo.EmpleadosMenores') IS NOT NULL
+BEGIN
+	DROP FUNCTION dbo.EmpleadosMenores
+END;
+GO
+
+CREATE FUNCTION dbo.EmpleadosMenores( @jefe numeric(6)) RETURNS INT
+AS BEGIN
+RETURN 0
+END
+
+GO
+
+ALTER FUNCTION dbo.EmpleadosMenores (@jefe numeric(6)) RETURNS INT
+BEGIN
+	DECLARE @fechaNac smalldatetime = (SELECT empl_nacimiento FROM Empleado WHERE empl_codigo = @jefe)
+	DECLARE @empleados int
+	-- Si tiene a alguien a cargo (mínimo 1)
+	IF EXISTS (SELECT 1 FROM Empleado WHERE empl_jefe = @jefe)
+	BEGIN
+		SELECT @empleados = (SELECT COUNT(*) + 
+								(SELECT SUM(dbo.EmpleadosMenores(empl_codigo))
+								 FROM Empleado 
+								 WHERE empl_jefe = @jefe
+								 GROUP BY empl_jefe)
+							FROM Empleado WHERE empl_jefe = @jefe AND empl_nacimiento < @fechaNac) -- Solo jefe directo
+	END
+	ELSE BEGIN
+		SELECT @empleados = 0
+	END
+	RETURN @empleados
+END
+
+GO
 -- 12) Transact
 IF OBJECT_ID('dbo.chk_empleados') IS NOT NULL
 BEGIN
@@ -520,7 +716,7 @@ GO
 ALTER FUNCTION GET_EMPLEADOS(@cod_emp numeric(6)) RETURNS INT AS
 BEGIN 
 	declare @empleados int;
-	--VEO SI TIENE EMPLEADOS
+	--VEO SI TIENE AL MENOS UN EMPLEADO
 	IF EXISTS ( SELECT 1 FROM Empleado WHERE empl_jefe = @cod_emp)
 	BEGIN
 		SELECT @empleados = 

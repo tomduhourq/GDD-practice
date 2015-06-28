@@ -764,3 +764,104 @@ GO
 
 ALTER TABLE Empleado ADD CONSTRAINT chk_empleados CHECK (dbo.CHECK_JEFES_OK(empl_jefe) = 1)
 
+/* 13) Cree el/los objetos de base de datos necesarios para que nunca un producto pueda
+ser compuesto por sí mismo.
+Se sabe que en la actualidad dicha regla se cumple y que la base de datos es
+accedida por n aplicaciones de diferentes tipos y tecnologías.
+No se conoce la cantidad de niveles de composición existentes. */
+
+-- Trigger instead of insert o update
+IF OBJECT_ID('dbo.checkCompuesto') IS NOT NULL
+BEGIN
+	DROP TRIGGER dbo.checkCompuesto;
+END;
+GO
+
+CREATE TRIGGER dbo.checkCompuesto ON Composicion INSTEAD OF INSERT,UPDATE
+AS BEGIN TRANSACTION
+	-- El update o insert podría haber sido masivo
+	
+	-- Primero verificar si fue update o insert, de cualquiera de las dos formas inserted se va a usar
+	DECLARE @cod_compuesto char(8)
+	DECLARE @cod_componente char(8)
+	DECLARE @cantidad_comp decimal(12, 2)
+	DECLARE ins_curs CURSOR FOR (SELECT * FROM inserted)
+	OPEN ins_curs
+	
+	IF (SELECT COUNT(*) FROM deleted) > 0 
+	BEGIN -- update
+		DECLARE @cod_compuesto_viejo char(8)
+		DECLARE @cod_componente_viejo char(8)
+		DECLARE @cantidad_comp_viejo decimal(12, 2)
+		DECLARE del_curs CURSOR FOR (SELECT * FROM deleted)
+		
+		OPEN del_curs
+		
+		FETCH NEXT FROM del_curs INTO @cod_compuesto_viejo, @cod_componente_viejo, @cantidad_comp_viejo
+		FETCH NEXT FROM ins_curs INTO @cod_compuesto, @cod_componente, @cantidad_comp
+		
+		WHILE @@FETCH_STATUS = 0
+		BEGIN
+		
+			IF @cod_compuesto = @cod_componente
+			
+			BEGIN
+				PRINT 'El producto está compuesto por sí mismo'
+				ROLLBACK TRANSACTION
+			END
+			
+			ELSE 
+			BEGIN
+				UPDATE Composicion 
+				SET comp_producto = @cod_compuesto, 
+					comp_componente = @cod_componente, 
+					comp_cantidad = @cantidad_comp
+			END
+			
+			FETCH NEXT FROM del_curs INTO @cod_compuesto_viejo, @cod_componente_viejo, @cantidad_comp_viejo
+			FETCH NEXT FROM ins_curs INTO @cod_compuesto, @cod_componente, @cantidad_comp
+		END
+		
+		CLOSE del_curs
+		DEALLOCATE del_curs
+	END
+	ELSE -- insert
+	BEGIN
+		FETCH NEXT FROM ins_curs INTO @cod_compuesto, @cod_componente, @cantidad_comp
+		
+		WHILE @@FETCH_STATUS = 0
+		BEGIN
+		
+			IF @cod_compuesto = @cod_componente
+			
+			BEGIN
+				PRINT 'El producto está compuesto por sí mismo'
+				ROLLBACK TRANSACTION
+			END
+			
+			ELSE 
+			BEGIN
+				INSERT INTO Composicion VALUES (@cod_compuesto, @cod_componente, @cantidad_comp)
+			END
+			
+			FETCH NEXT FROM ins_curs INTO @cod_compuesto, @cod_componente, @cantidad_comp
+		END
+	END
+	
+	CLOSE ins_curs
+	DEALLOCATE ins_curs
+COMMIT
+
+/* 14) Cree el/los objetos de base de datos necesarios para implantar la siguiente regla
+“Ningún jefe puede tener un salario mayor al 20% de las suma de los salarios de sus
+empleados totales (directos + indirectos)”. Se sabe que en la actualidad dicha regla
+se cumple y que la base de datos es accedida por n aplicaciones de diferentes tipos y
+tecnologías */
+IF OBJECT_ID('dbo.checkJefeSalario') IS NOT NULL
+BEGIN
+	DROP TRIGGER dbo.checkJefeSalario;
+END;
+GO
+
+-- Hay que hacer un trigger que se fije con una función el salario de los jefes insertados o actualizados.
+-- Rollbackear si no se cumple el constraint propuesto.

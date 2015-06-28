@@ -195,4 +195,47 @@ WHERE YEAR(fact_fecha) =
 	   WHERE fact_fecha = clie_codigo)
 GROUP BY clie_codigo
 ORDER BY 2 DESC;
-	  
+
+/* 15) Escriba una consulta que retorne los pares de productos que hayan sido vendidos
+juntos (en la misma factura) más de 500 veces. El resultado debe mostrar el código
+y descripción de cada uno de los productos y la cantidad de veces que fueron
+vendidos juntos. El resultado debe estar ordenado por la cantidad de veces que se
+vendieron juntos dichos productos. Los distintos pares no deben retornarse más de
+una vez.
+Ejemplo de lo que retornaría la consulta:
+PROD1 | DETALLE1		  | PROD2 | DETALLE2			  | VECES
+1731  | MARLBORO KS		  | 1718  | PHILIPS MORRIS KS     | 507
+1718  | PHILIPS MORRIS KS | 1705  | PHILIPS MORRIS BOX 10 | 562		*/
+SELECT i1.item_producto as PROD1,
+	   p1.prod_detalle as DETALLE1,
+	   i2.item_producto as PROD2,
+	   p2.prod_detalle as DETALLE2,
+	   SUM(i1.item_cantidad) + SUM(i2.item_cantidad) as  VECES
+FROM Item_Factura i1
+INNER JOIN Item_Factura i2
+ON i1.item_tipo = i2.item_tipo AND
+   i1.item_sucursal = i2.item_sucursal AND
+   i1.item_numero = i2.item_numero AND
+   i1.item_producto != i2.item_producto	 
+INNER JOIN Producto p1
+ON p1.prod_codigo = i1.item_producto
+INNER JOIN Producto p2
+ON p2.prod_codigo = i2.item_producto 
+WHERE i1.item_producto > i2.item_producto
+GROUP BY i1.item_producto, p1.prod_detalle, i2.item_producto, p2.prod_detalle
+HAVING (SUM(i1.item_cantidad) + SUM(i2.item_cantidad)) > 500
+ORDER BY VECES
+
+/* 16) Con el fin de lanzar una nueva campaña comercial para los clientes que menos
+compran en la empresa, se pide una consulta SQL que retorne aquellos clientes
+cuyas ventas son inferiores a 1/3 del promedio de ventas del/los producto/s que más 
+se vendieron en el 2012.
+Además mostrar
+1. Nombre del Cliente
+2. Cantidad de unidades totales vendidas en el 2012 para ese cliente.
+3. Código de producto que mayor venta tuvo en el 2012 (en caso de existir más de
+1, mostrar solamente el de menor código) para ese cliente.
+Aclaraciones:
+La composición es de 2 niveles, es decir, un producto compuesto solo se compone
+de productos no compuestos.
+Los clientes deben ser ordenados por código de provincia ascendente. */SELECTc.clie_codigo,c.clie_razon_social,SUM(i.item_cantidad) as unidades_vendidas_2012,(SELECT TOP 1 item_producto 	FROM Item_Factura i2 	WHERE i2.item_tipo = i.item_tipo AND 		  i2.item_numero = i.item_numero AND		  i2.item_sucursal = i.item_sucursal		  GROUP BY i2.item_producto 		  ORDER BY SUM(item_cantidad)) as Mas_vendidoFROM Cliente cINNER JOIN Factura fON f.fact_cliente = c.clie_codigoINNER JOIN Item_Factura iON f.fact_tipo = i.item_tipo AND   f.fact_sucursal = i.item_sucursal AND   f.fact_numero = i.item_numeroWHERE YEAR(f.fact_fecha) = 2012 AND	(SELECT SUM(fact_total) 	FROM Factura f2	WHERE f2.fact_cliente = f.fact_cliente AND 	YEAR(fact_fecha) = 2012) < 	(0.33 * (SELECT TOP 10 AVG(i3.item_cantidad * i3.item_precio) 	FROM Factura f3 	INNER JOIN Item_Factura i3	ON f3.fact_tipo = i3.item_tipo AND	   f3.fact_sucursal = i3.item_sucursal AND	   f3.fact_numero = i3.item_numero	WHERE YEAR(f3.fact_fecha) = 2012	ORDER BY SUM(i3.item_cantidad * i3.item_precio)))GROUP BY c.clie_codigo, c.clie_razon_social, i.item_tipo, i.item_numero, i.item_sucursal, i.item_productoORDER BY c.clie_razon_social -- no existe provincia en el schema

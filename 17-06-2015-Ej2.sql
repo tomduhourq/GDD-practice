@@ -1,6 +1,7 @@
 /* Implemente el/los objetos de base de datos para actualizar la columna 
 empl_ventas_historicas (decimal(12,2) para un vendedor,
 la sumatoria de las facturas que vendió ante una operación de DML*/
+
 IF COL_LENGTH('Empleado', 'empl_ventas_historicas') IS NOT NULL
 BEGIN
 	ALTER TABLE Empleado DROP COLUMN empl_ventas_historicas
